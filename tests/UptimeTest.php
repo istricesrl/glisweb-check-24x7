@@ -25,7 +25,7 @@
             $this->assertSame( '/var/www/', $conf['radice'] );
             $this->assertSame( 4, $conf['paralleli'] );
             $this->assertSame( array(), $conf['esterni'] );
-            $this->assertSame( array( 'PROD*' ), $conf['profili'] );
+            $this->assertSame( array( '*' ), $conf['profili'] );
 
             // senza server: la configurazione non vale
             file_put_contents( $file, "token: x\n" );
@@ -45,7 +45,7 @@
 
         }
 
-        // uptimeProfilo() -> il profilo che il bootstrap glisweb darebbe all'host: si controllano solo quelli PROD*
+        // uptimeProfilo() -> il profilo che il bootstrap glisweb darebbe all'host
         public function testProfilo() {
 
             $sites = array(
@@ -97,7 +97,7 @@
                 $vecchio => array( 'example.org', 'escluso.example.org' )
             );
             $scartati = array();
-            $siti = uptimeSiti( $radice, $vhost, array( 'escluso.example.org' ), $scartati );
+            $siti = uptimeSiti( $radice, $vhost, array( 'escluso.example.org' ), $scartati, array( 'PROD*' ) );
 
             $this->assertSame( array( 'example.com', 'example.org', 'www.example.com' ), array_keys( $siti ) );
             $this->assertSame( 'https://example.com/status/uptime', $siti['example.com']['url'] );
@@ -143,14 +143,15 @@
                 'hosts' => array( 'DEV' => 'www', 'TEST' => 'www', 'PROD' => 'www' ) ) ) ) ) );
             $vhost = array( $dev => array( 'example.com', 'example.net', 'example.org' ) );
 
-            // di default solo la produzione
+            // di default tutti, qualunque sia il profilo
             $siti = uptimeSiti( $radice, $vhost );
-            $this->assertSame( array( 'example.com' ), array_keys( $siti ) );
+            $this->assertSame( array( 'example.com', 'example.net', 'example.org' ), array_keys( $siti ) );
             $this->assertSame( 'PROD', $siti['example.com']['profilo'] );
+            $this->assertSame( 'DEV', $siti['example.net']['profilo'] );
 
-            // il cluster ne chiede di più
+            // il cluster restringe
+            $this->assertSame( array( 'example.com' ), array_keys( uptimeSiti( $radice, $vhost, array(), $scartati, array( 'PROD*' ) ) ) );
             $this->assertSame( array( 'example.com', 'example.org' ), array_keys( uptimeSiti( $radice, $vhost, array(), $scartati, array( 'PROD*', 'TEST*' ) ) ) );
-            $this->assertSame( array( 'example.com', 'example.net', 'example.org' ), array_keys( uptimeSiti( $radice, $vhost, array(), $scartati, array( '*' ) ) ) );
 
             // il deploy sostituisce il cluster
             file_put_contents( $dev . '/etc/uptime.yaml', "profili: [ DEV ]\n" );

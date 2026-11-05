@@ -9,11 +9,10 @@
      *
      * introduzione
      * ============
-     * Ogni server del cluster controlla una volta al minuto tutti i siti glisweb di produzione del cluster, i propri e
+     * Ogni server del cluster controlla una volta al minuto tutti i siti glisweb del cluster, i propri e
      * quelli che gli altri server pubblicano, più i siti esterni elencati nella configurazione del cluster, e pubblica a
-     * sua volta quello che vede. Di default si controllano solo i siti di produzione, cioè gli host a cui il deploy dà
-     * un profilo che comincia per PROD; quali profili controllare si sceglie per cluster, per deploy e per host ( vedi
-     * uptimeSiti() ).
+     * sua volta quello che vede. Di default si controlla ogni host servito, qualunque profilo gli dia il deploy; chi
+     * vuole restringere sceglie i profili per cluster, per deploy e per host ( vedi uptimeSiti() ).
      * Un sito è giù quando un server lo trova giù per UPTIME_DEFAULT['soglia'] controlli consecutivi e almeno un altro
      * server lo vede giù: il server che non raggiunge niente ha un problema suo, non del sito. Se nessun altro server
      * risponde, il sito è giù ma non confermato, e l'avviso va solo a noi.
@@ -44,7 +43,7 @@
      * uptimeRegexp()                   | costruisce l'espressione regolare degli host di un sito per uno stato
      * uptimeProfilo()                  | ricava il profilo ( DEV, TEST, PROD... ) che un deploy dà a un host
      * uptimeProfiloAmmesso()           | dice se un profilo è fra quelli da controllare
-     * uptimeSiti()                     | raccoglie i siti glisweb di produzione dei deploy del server
+     * uptimeSiti()                     | raccoglie i siti glisweb da controllare dei deploy del server
      * uptimeEsterni()                  | prepara i siti esterni della configurazione del cluster
      * uptimeImpronta()                 | calcola l'impronta della sezione esterni:, da confrontare fra i server
      * uptimeControlla()                | controlla in parallelo un elenco di siti
@@ -130,7 +129,7 @@
             'smtp'      => array(),
             'avvisa'    => array(),
             'esterni'   => array(),
-            'profili'   => array( 'PROD*' )
+            'profili'   => array( '*' )
         ), $conf );
 
         $conf['dati'] = rtrim( $conf['dati'], '/' ) . '/';
@@ -351,14 +350,14 @@
      *
      * livello      dove                                    cosa
      * -------------|---------------------------------------|------------------------------------------------------
-     * cluster      profili: di /etc/glisweb/uptime.yaml    i profili da controllare su tutti i deploy, di default PROD*
+     * cluster      profili: di /etc/glisweb/uptime.yaml    i profili da controllare su tutti i deploy, di default *
      * deploy       profili: di etc/uptime.yaml del deploy  sostituisce quelli del cluster per gli host di quel deploy
      * host         attivo: di etc/uptime/<host>.yaml       true lo controlla qualunque sia il profilo, false mai
      *
-     * Di default si controllano solo i siti di produzione, perché gli ambienti DEV e TEST di solito non li usa nessuno
-     * ( decisione di Fabio del 04/11/2026 ); ma un cliente può voler controllare anche quelli, e per questo la scelta
-     * si può spostare a ogni livello ( decisione di Fabio del 05/11/2026 ). L'elenco escludi: del cluster vince su
-     * tutto: è una scelta di chi amministra il server.
+     * Di default si controlla tutto: si controlla per url, qualunque sia il profilo ( decisione di Fabio del
+     * 05/11/2026; il 04/11 erano solo i PROD*, ma un cliente può voler controllare anche DEV e TEST, e un deploy DEV
+     * può fare da produzione ). I tre livelli restano per chi vuole restringere. L'elenco escludi: del cluster vince
+     * su tutto: è una scelta di chi amministra il server.
      *
      * Restano fuori anche gli host di $escludi e quelli che non si risolvono nel DNS pubblico ( uptimePubblico() ): i
      * vhost di prova solo locali, in /etc/hosts verso 127.0.0.1 col certificato snakeoil, davano un falso down
@@ -377,7 +376,7 @@
      * @return  array                       i siti, indicizzati per host, ognuno col suo profilo
      *
      */
-    function uptimeSiti( $radice = '/var/www/', $vhost = array(), $escludi = array(), &$scartati = array(), $profili = array( 'PROD*' ) ) {
+    function uptimeSiti( $radice = '/var/www/', $vhost = array(), $escludi = array(), &$scartati = array(), $profili = array( '*' ) ) {
 
         $siti = array();
 

@@ -3,9 +3,9 @@
 Controllo di uptime dei siti [glisweb](https://github.com/istricesrl/glisweb) di un cluster di server, indipendente
 dal framework.
 
-Ogni server del cluster controlla una volta al minuto tutti i siti glisweb di produzione, i suoi e quelli degli
-altri server, più i siti esterni della configurazione ( quali profili controllare, anche `DEV` e `TEST`, si sceglie
-per cluster, per deploy e per host ); i server si scambiano quello che vedono, e **un sito è giù
+Ogni server del cluster controlla una volta al minuto tutti i siti glisweb, i suoi e quelli degli altri server,
+qualunque profilo abbiano ( chi vuole restringere sceglie i profili per cluster, per deploy e per host ), più i siti
+esterni della configurazione; i server si scambiano quello che vedono, e **un sito è giù
 solo se lo vedono giù almeno due server**. Tiene il registro dei periodi di down, ne ricava il `DOWNTIME.md` di ogni
 progetto e avvisa per mail chi lo amministra, e il referente del sito solo se abilitato e a down confermato.
 

@@ -14,9 +14,10 @@ cluster:
 # dati: /var/lib/glisweb-check-24x7/
 paralleli: 4
 escludi: [ "prova.example.com" ]
-# i profili da controllare, alla fnmatch(): un deploy li sostituisce col suo etc/uptime.yaml, un host si accende
-# o si spegne con attivo: true|false nel suo etc/uptime/<host>.yaml
-profili: [ "PROD*" ]
+# i profili da controllare, alla fnmatch(): di default tutti; per restringere, p.es. [ "PROD*" ]. Un deploy li
+# sostituisce col suo etc/uptime.yaml, un host si accende o si spegne con attivo: true|false nel suo
+# etc/uptime/<host>.yaml
+# profili: [ "*" ]
 smtp:
   host: localhost
   port: 25

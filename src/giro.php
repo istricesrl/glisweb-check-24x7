@@ -181,7 +181,7 @@
     $irrisolti = array_keys( $scartati, 'dns' );
     if( empty( $locali ) && ! empty( $irrisolti ) && $primo && ( ! isset( $prima['dns'] ) || $prima['dns'] !== date( 'Y-m-d', $ora ) ) ) {
         $posta[] = array( $noi, '[uptime] ' . $io . ': nessun sito risolto nel DNS',
-            'Nessuno dei ' . count( $irrisolti ) . ' siti di produzione di ' . $io . ' si risolve nel DNS pubblico: controllare il resolver del server.' . PHP_EOL );
+            'Nessuno dei ' . count( $irrisolti ) . ' siti da controllare di ' . $io . ' si risolve nel DNS pubblico: controllare il resolver del server.' . PHP_EOL );
         $dns = date( 'Y-m-d', $ora );
     } else {
         $dns = isset( $prima['dns'] ) ? $prima['dns'] : NULL;

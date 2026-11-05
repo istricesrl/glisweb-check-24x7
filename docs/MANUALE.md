@@ -4,7 +4,7 @@
 > rinnovato; il 05/11/2026 è uscito dal framework ed è diventato questo progetto. Le decisioni di partenza sono di
 > Fabio Mosti.
 
-Come i server di un cluster si accorgono che un sito glisweb di produzione è giù, chi avvisano, come si installa,
+Come i server di un cluster si accorgono che un sito glisweb è giù, chi avvisano, come si installa,
 come si configura e come si esercita.
 
 1. [cos'è e perché sta da solo](#cosè-e-perché-sta-da-solo)
@@ -24,9 +24,8 @@ cos'è e perché sta da solo
 
 - gira su ogni server del cluster, e **ogni server controlla tutti i siti**: si controllano a vicenda, così un
   server che non raggiunge niente non manda falsi allarmi;
-- di default controlla **solo i siti di produzione**, cioè gli host a cui un deploy dà un profilo che comincia per
-  `PROD` ( `PROD`, `PRODWMS`, `PRODSITO`... ), perché i `DEV` e i `TEST` di solito non li usa nessuno; ma quali
-  profili controllare si sceglie per cluster, per deploy e per singolo host, fino a controllare tutto ( vedi
+- di default controlla **ogni host servito**, qualunque profilo gli dia il deploy ( `PROD`, `TEST`, `DEV`... ): si
+  controlla per url. Chi vuole restringere sceglie i profili per cluster, per deploy e per singolo host ( vedi
   [quali profili si controllano](#quali-profili-si-controllano) );
 - controlla anche i **siti esterni**, che non stanno sui server del cluster ma interessano lo stesso;
 - tiene un registro dei periodi di down e ne ricava il `DOWNTIME.md` di ogni progetto;
@@ -59,8 +58,8 @@ il giro di un minuto
 Ogni server ha un timer systemd, `glisweb-check-24x7.timer`, che una volta al minuto lancia `bin/check`. Il giro:
 
 1. legge `/etc/glisweb/uptime.yaml`;
-2. chiede agli altri server la loro **vista**: i siti di produzione che ospitano e lo stato che vedono;
-3. raccoglie i siti di produzione di questo server, ci aggiunge quelli degli altri e gli esterni;
+2. chiede agli altri server la loro **vista**: i siti che ospitano e lo stato che vedono;
+3. raccoglie i siti da controllare di questo server, ci aggiunge quelli degli altri e gli esterni;
 4. li controlla, quattro alla volta, e applica l'**isteresi**;
 5. decide lo stato di ogni sito col **consenso** fra i server;
 6. scrive la vista, il registro e il `DOWNTIME.md`, e manda gli avvisi.
@@ -90,21 +89,22 @@ I profili da controllare sono un elenco di modelli alla `fnmatch()`: `PROD*` vuo
 
 livello  | dove                                      | cosa
 ---------|-------------------------------------------|--------------------------------------------------------------
-cluster  | `profili:` di `/etc/glisweb/uptime.yaml`  | i profili da controllare su tutti i deploy del server; di default `[ "PROD*" ]`
+cluster  | `profili:` di `/etc/glisweb/uptime.yaml`  | i profili da controllare su tutti i deploy del server; di default `[ "*" ]`, tutti
 deploy   | `profili:` di `etc/uptime.yaml` nel deploy | sostituisce l'elenco del cluster per gli host di quel deploy
 host     | `attivo:` di `etc/uptime/<host>.yaml`     | `true` lo controlla qualunque sia il profilo, `false` mai
 
-Il caso tipico è il cliente che vuole il controllo anche sul suo ambiente di prova: nel suo deploy si scrive
+Col default `[ "*" ]` non serve configurare niente: si controlla ogni host servito, e un deploy di sviluppo che fa
+da produzione per il cliente ( profilo `DEV`, ma usato davvero ) rientra senza cambiargli il profilo, che
+cambierebbe anche il comportamento dell'applicazione. I livelli servono a restringere: un cluster che vuole solo la
+produzione scrive `profili: [ "PROD*" ]` nello yaml; un deploy che, da lì, vuole anche il suo ambiente di prova
+scrive
 
 ```yaml
 # etc/uptime.yaml
 profili: [ "PROD*", "TEST*" ]
 ```
 
-e da quel momento i suoi host `TEST` si controllano come quelli di produzione, con gli stessi avvisi. Per un host
-solo basta `attivo: true` nel suo `etc/uptime/<host>.yaml`. Un deploy di sviluppo che fa da produzione per il
-cliente ( profilo `DEV`, ma usato davvero ) si accende allo stesso modo, senza cambiargli il profilo, che
-cambierebbe anche il comportamento dell'applicazione.
+e un host singolo si accende o si spegne con `attivo: true` o `false` nel suo `etc/uptime/<host>.yaml`.
 
 Gli host vengono dai virtual host e non dai domini della configurazione, che decidono solo il profilo: un dominio
 `PROD` può stare su un altro server.
@@ -283,7 +283,7 @@ campo          | obbligatorio | cosa
 `dati`         | no           | la cartella di vista e registro, di default `/var/lib/glisweb-check-24x7/`
 `paralleli`    | no           | i controlli contemporanei, di default 4
 `escludi`      | no           | gli host da non controllare, qualunque cosa dicano deploy e host
-`profili`      | no           | i modelli dei profili da controllare, di default `[ "PROD*" ]`; vedi [quali profili si controllano](#quali-profili-si-controllano)
+`profili`      | no           | i modelli dei profili da controllare, di default `[ "*" ]`, tutti; vedi [quali profili si controllano](#quali-profili-si-controllano)
 `esterni`      | no           | i siti esterni, vedi sotto
 
 Il token si genera una volta sola, per esempio con `openssl rand -hex 32`, e si copia uguale su tutti i server; non
@@ -411,7 +411,7 @@ interroga il DNS con `dns_get_record()`, che non legge `/etc/hosts` ). Di solito
 resolver del server giù
 -----------------------
 Se il DNS del server non risponde, nessun sito si risolve, e il controllo si spegnerebbe in silenzio. Il giro se ne
-accorge quando il server ha siti di produzione e non ne risolve nessuno, e avvisa noi una volta al giorno.
+accorge quando il server ha siti da controllare e non ne risolve nessuno, e avvisa noi una volta al giorno.
 
 SMTP rotto
 ----------
@@ -481,8 +481,8 @@ vista servita da un alias Apache su `www/`, non da un deploy | risponde anche co
 dati in `/var/lib/glisweb-check-24x7/`                       | sono stato del servizio, non del codice: sopravvivono a un `git pull` e a una reinstallazione
 regola dei profili copiata ( `uptimeRegexp()` ) e non inclusa | includere `_string.tools.php` di un deploy rimetterebbe la dipendenza; il test ne fissa la forma
 avvisi con PHPMailer via composer, non con `sendMail()`      | stessa libreria del framework, senza il framework
-di default solo i siti con profilo `PROD*`                   | i DEV e i TEST di solito non li usa nessuno
-profili da controllare scelti per cluster, deploy e host ( 05/11/2026 ) | un cliente può voler controllare anche DEV e TEST: decisione di Fabio, massima flessibilità
+si controlla per url, qualunque sia il profilo: default `*` ( 05/11/2026 ) | decisione di Fabio: un cliente può voler controllare anche DEV e TEST, e un DEV può fare da produzione; il 04/11 erano solo i `PROD*`
+profili da controllare scelti per cluster, deploy e host ( 05/11/2026 ) | massima flessibilità, per chi vuole restringere
 `attivo: true` non salta il controllo del DNS pubblico        | un host che gli altri server non raggiungono darebbe solo falsi down
 host dai virtual host e non dai domini della configurazione  | i domini `PROD` non sono sempre quelli serviti dal server
 deploy cercati in `dev`, `stable` e `test`                   | la produzione sta di solito in `stable`
