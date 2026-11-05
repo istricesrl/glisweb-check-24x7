@@ -24,8 +24,10 @@ cos'è e perché sta da solo
 
 - gira su ogni server del cluster, e **ogni server controlla tutti i siti**: si controllano a vicenda, così un
   server che non raggiunge niente non manda falsi allarmi;
-- controlla **solo i siti di produzione**, cioè gli host a cui un deploy dà un profilo che comincia per `PROD`
-  ( `PROD`, `PRODWMS`, `PRODSITO`... ). I `DEV` e i `TEST` non li usa nessuno;
+- di default controlla **solo i siti di produzione**, cioè gli host a cui un deploy dà un profilo che comincia per
+  `PROD` ( `PROD`, `PRODWMS`, `PRODSITO`... ), perché i `DEV` e i `TEST` di solito non li usa nessuno; ma quali
+  profili controllare si sceglie per cluster, per deploy e per singolo host, fino a controllare tutto ( vedi
+  [quali profili si controllano](#quali-profili-si-controllano) );
 - controlla anche i **siti esterni**, che non stanno sui server del cluster ma interessano lo stesso;
 - tiene un registro dei periodi di down e ne ricava il `DOWNTIME.md` di ogni progetto;
 - **avvisa noi** per primi, e il referente del sito solo se abilitato e solo a down confermato.
@@ -73,11 +75,36 @@ default `/var/www` e la cartella è `dev`, `stable` o `test`: la produzione di s
 deploy il giro prende gli host dei virtual host HTTPS di Apache ( o nginx ) che hanno quella document root, col
 `ServerName`: gli alias restano fuori, perché di solito sono le varianti col `www`. Poi tiene un host solo se:
 
-1. il deploy gli dà un profilo che comincia per `PROD`. Il profilo lo ricava `uptimeProfilo()` con la stessa regola
-   del bootstrap glisweb ( `_src/_config/_015.site.php` e `site2regexp()` ), sulla configurazione del deploy letta
-   come la legge il bootstrap, shadow compresi. Un host a cui nessun sito risponde vale come `DEV`;
-2. non è nell'elenco `escludi:` del cluster;
-3. si risolve nel **DNS pubblico** verso un IP pubblico. La verifica non legge `/etc/hosts`.
+1. il suo profilo è fra quelli da controllare ( vedi sotto ), o il suo `etc/uptime/<host>.yaml` dice `attivo: true`.
+   Il profilo lo ricava `uptimeProfilo()` con la stessa regola del bootstrap glisweb ( `_src/_config/_015.site.php`
+   e `site2regexp()` ), sulla configurazione del deploy letta come la legge il bootstrap, shadow compresi. Un host a
+   cui nessun sito risponde vale come `DEV`, come nel bootstrap;
+2. non è nell'elenco `escludi:` del cluster, che vince su tutto;
+3. si risolve nel **DNS pubblico** verso un IP pubblico. La verifica non legge `/etc/hosts`, e vale anche per gli
+   host forzati con `attivo: true`: un host che gli altri server non raggiungono darebbe solo falsi down.
+
+quali profili si controllano
+----------------------------
+I profili da controllare sono un elenco di modelli alla `fnmatch()`: `PROD*` vuol dire `PROD`, `PRODWMS`,
+`PRODSITO`...; `DEV` il solo `DEV`; `*` tutti. La scelta sta su tre livelli, e il più specifico vince:
+
+livello  | dove                                      | cosa
+---------|-------------------------------------------|--------------------------------------------------------------
+cluster  | `profili:` di `/etc/glisweb/uptime.yaml`  | i profili da controllare su tutti i deploy del server; di default `[ "PROD*" ]`
+deploy   | `profili:` di `etc/uptime.yaml` nel deploy | sostituisce l'elenco del cluster per gli host di quel deploy
+host     | `attivo:` di `etc/uptime/<host>.yaml`     | `true` lo controlla qualunque sia il profilo, `false` mai
+
+Il caso tipico è il cliente che vuole il controllo anche sul suo ambiente di prova: nel suo deploy si scrive
+
+```yaml
+# etc/uptime.yaml
+profili: [ "PROD*", "TEST*" ]
+```
+
+e da quel momento i suoi host `TEST` si controllano come quelli di produzione, con gli stessi avvisi. Per un host
+solo basta `attivo: true` nel suo `etc/uptime/<host>.yaml`. Un deploy di sviluppo che fa da produzione per il
+cliente ( profilo `DEV`, ma usato davvero ) si accende allo stesso modo, senza cambiargli il profilo, che
+cambierebbe anche il comportamento dell'applicazione.
 
 Gli host vengono dai virtual host e non dai domini della configurazione, che decidono solo il profilo: un dominio
 `PROD` può stare su un altro server.
@@ -255,18 +282,25 @@ campo          | obbligatorio | cosa
 `radice`       | no           | la cartella dei progetti, di default `/var/www/`
 `dati`         | no           | la cartella di vista e registro, di default `/var/lib/glisweb-check-24x7/`
 `paralleli`    | no           | i controlli contemporanei, di default 4
-`escludi`      | no           | gli host da non controllare
+`escludi`      | no           | gli host da non controllare, qualunque cosa dicano deploy e host
+`profili`      | no           | i modelli dei profili da controllare, di default `[ "PROD*" ]`; vedi [quali profili si controllano](#quali-profili-si-controllano)
 `esterni`      | no           | i siti esterni, vedi sotto
 
 Il token si genera una volta sola, per esempio con `openssl rand -hex 32`, e si copia uguale su tutti i server; non
 va scritto in nessun file versionato né in nessun documento. Il campo `deploy:` delle versioni nel framework non
 serve più e si ignora. Un esempio, coi segnaposto, è in `esempi/uptime.yaml`.
 
+la configurazione di un deploy
+------------------------------
+`etc/uptime.yaml` nel deploy, versionato col progetto, ha per ora una chiave sola, `profili:`, che sostituisce
+quella del cluster per gli host del deploy ( vedi [quali profili si controllano](#quali-profili-si-controllano) ).
+Senza il file, o senza la chiave, vale l'elenco del cluster.
+
 la configurazione di un sito
 ----------------------------
 Un sito di un deploy si personalizza con `etc/uptime/<host>.yaml` nel deploy, versionato col progetto: il file
 sovrascrive i default ( `UPTIME_DEFAULT` in `src/uptime.php` ) o dichiara un host che i virtual host non mostrano.
-Il profilo deve comunque essere `PROD*`. Se due deploy servono lo stesso host vince il primo in ordine alfabetico,
+L'host si controlla se il suo profilo è fra quelli da controllare, o se il file dice `attivo: true`. Se due deploy servono lo stesso host vince il primo in ordine alfabetico,
 a meno che l'host abbia un suo file in un altro deploy.
 
 campo          | default            | cosa
@@ -278,7 +312,7 @@ campo          | default            | cosa
 `lento`        | `3`                | secondi oltre i quali, per `soglia` giri di fila, il sito è lento
 `certificato`  | `14`               | giorni di validità sotto i quali si avvisa noi, una volta al giorno
 `soglia`       | `3`                | giri consecutivi per dire giù, o lento
-`attivo`       | —                  | `false` toglie il sito dal controllo
+`attivo`       | —                  | `true` lo controlla qualunque sia il profilo, `false` lo toglie dal controllo
 `avvisa`       | quello del cluster | gli avvisi del sito, vedi sotto
 
 ```yaml
@@ -329,8 +363,8 @@ un server non risolve nessuno dei suoi siti    | noi, una volta al giorno
 la sezione `esterni:` diverge fra i server     | noi, una volta al giorno
 risposta lenta                                 | nessuno: solo il registro
 
-Il referente non riceve mai un down non confermato, e non riceve niente per i siti `DEV` e `TEST`, che non si
-controllano.
+Il referente non riceve mai un down non confermato. Un sito `DEV` o `TEST` acceso ( vedi
+[quali profili si controllano](#quali-profili-si-controllano) ) ha gli stessi avvisi di uno di produzione.
 
 esercizio
 =========
@@ -421,8 +455,8 @@ vendor/bin/phpunit
 
 I test sono due gruppi:
 
-- `tests/UptimeTest.php` prova le funzioni: configurazione, DNS pubblico, profili, raccolta dei siti da deploy
-  finti in una cartella temporanea, esterni, impronta, virtual host, isteresi, lentezza, consenso, registro e
+- `tests/UptimeTest.php` prova le funzioni: configurazione, DNS pubblico, profili e modelli dei profili, raccolta
+  dei siti da deploy finti in una cartella temporanea coi tre livelli della scelta dei profili, esterni, impronta, virtual host, isteresi, lentezza, consenso, registro e
   `DOWNTIME.md`, avvisi falliti. Chiede al DNS pubblico solo per `localhost`, un dominio `.invalid` ed
   `example.com`;
 - `tests/GiroTest.php` è d'integrazione: avvia il server PHP integrato su una porta libera di `127.0.0.1` col
@@ -447,7 +481,9 @@ vista servita da un alias Apache su `www/`, non da un deploy | risponde anche co
 dati in `/var/lib/glisweb-check-24x7/`                       | sono stato del servizio, non del codice: sopravvivono a un `git pull` e a una reinstallazione
 regola dei profili copiata ( `uptimeRegexp()` ) e non inclusa | includere `_string.tools.php` di un deploy rimetterebbe la dipendenza; il test ne fissa la forma
 avvisi con PHPMailer via composer, non con `sendMail()`      | stessa libreria del framework, senza il framework
-solo i siti con profilo `PROD*`                              | i DEV e i TEST non li usa nessuno
+di default solo i siti con profilo `PROD*`                   | i DEV e i TEST di solito non li usa nessuno
+profili da controllare scelti per cluster, deploy e host ( 05/11/2026 ) | un cliente può voler controllare anche DEV e TEST: decisione di Fabio, massima flessibilità
+`attivo: true` non salta il controllo del DNS pubblico        | un host che gli altri server non raggiungono darebbe solo falsi down
 host dai virtual host e non dai domini della configurazione  | i domini `PROD` non sono sempre quelli serviti dal server
 deploy cercati in `dev`, `stable` e `test`                   | la produzione sta di solito in `stable`
 `/status/uptime` pubblico solo OK/KO, vista solo col token   | i nomi dei clienti non si espongono

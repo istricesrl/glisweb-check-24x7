@@ -4,13 +4,14 @@ Controllo di uptime dei siti [glisweb](https://github.com/istricesrl/glisweb) di
 dal framework.
 
 Ogni server del cluster controlla una volta al minuto tutti i siti glisweb di produzione, i suoi e quelli degli
-altri server, più i siti esterni della configurazione; i server si scambiano quello che vedono, e **un sito è giù
+altri server, più i siti esterni della configurazione ( quali profili controllare, anche `DEV` e `TEST`, si sceglie
+per cluster, per deploy e per host ); i server si scambiano quello che vedono, e **un sito è giù
 solo se lo vedono giù almeno due server**. Tiene il registro dei periodi di down, ne ricava il `DOWNTIME.md` di ogni
 progetto e avvisa per mail chi lo amministra, e il referente del sito solo se abilitato e a down confermato.
 
 Sta in un progetto suo, e non dentro un deploy, perché **un controllo di uptime non deve dipendere da quello che
 controlla**: un timer appoggiato a un deploy muore con un aggiornamento notturno sbagliato di quel deploy. Dei deploy
-legge solo `/status/uptime` e i file `etc/uptime/<host>.yaml`, che il framework fornisce.
+legge solo `/status/uptime`, `etc/uptime.yaml` ed `etc/uptime/<host>.yaml`, che il framework fornisce.
 
 ## requisiti
 

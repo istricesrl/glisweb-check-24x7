@@ -25,6 +25,7 @@
             $this->assertSame( '/var/www/', $conf['radice'] );
             $this->assertSame( 4, $conf['paralleli'] );
             $this->assertSame( array(), $conf['esterni'] );
+            $this->assertSame( array( 'PROD*' ), $conf['profili'] );
 
             // senza server: la configurazione non vale
             file_put_contents( $file, "token: x\n" );
@@ -109,6 +110,59 @@
             $this->assertNull( $siti['example.org']['testo'] );
             $this->assertNull( $siti['example.org']['codice'] );
             $this->assertSame( 'profilo DEV', $scartati['nuovo.istricesrl.it'] );
+
+            exec( 'rm -rf ' . escapeshellarg( $radice ) );
+
+        }
+
+        // uptimeProfiloAmmesso() -> modelli alla fnmatch, e l'host senza profilo vale come DEV
+        public function testProfiloAmmesso() {
+
+            $this->assertTrue( uptimeProfiloAmmesso( 'PRODWMS', array( 'PROD*' ) ) );
+            $this->assertFalse( uptimeProfiloAmmesso( 'DEV', array( 'PROD*' ) ) );
+            $this->assertTrue( uptimeProfiloAmmesso( 'TEST', array( 'PROD*', 'TEST*' ) ) );
+            $this->assertFalse( uptimeProfiloAmmesso( 'DEVELOP', array( 'DEV' ) ) );
+            $this->assertTrue( uptimeProfiloAmmesso( 'DEV', array( '*' ) ) );
+            $this->assertTrue( uptimeProfiloAmmesso( NULL, array( 'DEV' ) ) );
+            $this->assertFalse( uptimeProfiloAmmesso( NULL, array( 'PROD*' ) ) );
+            $this->assertFalse( uptimeProfiloAmmesso( 'PROD', array() ) );
+
+        }
+
+        // uptimeSiti() -> quali profili si controllano: il cluster, poi il deploy, poi l'host
+        public function testSitiProfili() {
+
+            $radice = sys_get_temp_dir() . '/uptime-profili-' . getmypid();
+            $dev = $radice . '/progetto/dev';
+            mkdir( $dev . '/_src', 0755, true );
+            mkdir( $dev . '/src', 0755, true );
+            mkdir( $dev . '/etc/uptime', 0755, true );
+            touch( $dev . '/_src/_config.php' );
+            file_put_contents( $dev . '/src/config.json', json_encode( array( 'sites' => array( 1 => array(
+                'domains' => array( 'DEV' => 'example.net', 'TEST' => 'example.org', 'PROD' => 'example.com' ),
+                'hosts' => array( 'DEV' => 'www', 'TEST' => 'www', 'PROD' => 'www' ) ) ) ) ) );
+            $vhost = array( $dev => array( 'example.com', 'example.net', 'example.org' ) );
+
+            // di default solo la produzione
+            $siti = uptimeSiti( $radice, $vhost );
+            $this->assertSame( array( 'example.com' ), array_keys( $siti ) );
+            $this->assertSame( 'PROD', $siti['example.com']['profilo'] );
+
+            // il cluster ne chiede di più
+            $this->assertSame( array( 'example.com', 'example.org' ), array_keys( uptimeSiti( $radice, $vhost, array(), $scartati, array( 'PROD*', 'TEST*' ) ) ) );
+            $this->assertSame( array( 'example.com', 'example.net', 'example.org' ), array_keys( uptimeSiti( $radice, $vhost, array(), $scartati, array( '*' ) ) ) );
+
+            // il deploy sostituisce il cluster
+            file_put_contents( $dev . '/etc/uptime.yaml', "profili: [ DEV ]\n" );
+            $scartati = array();
+            $this->assertSame( array( 'example.net' ), array_keys( uptimeSiti( $radice, $vhost, array(), $scartati, array( 'PROD*', 'TEST*' ) ) ) );
+            $this->assertSame( 'profilo PROD', $scartati['example.com'] );
+
+            // l'host vince sul deploy, in tutti e due i versi, e escludi: del cluster vince su tutto
+            file_put_contents( $dev . '/etc/uptime/example.org.yaml', "attivo: true\n" );
+            file_put_contents( $dev . '/etc/uptime/example.net.yaml', "attivo: false\n" );
+            $this->assertSame( array( 'example.org' ), array_keys( uptimeSiti( $radice, $vhost ) ) );
+            $this->assertSame( array(), uptimeSiti( $radice, $vhost, array( 'example.org' ) ) );
 
             exec( 'rm -rf ' . escapeshellarg( $radice ) );
 

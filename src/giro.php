@@ -79,7 +79,7 @@
 
     // i siti di questo server e quelli che pubblicano gli altri
     $scartati = array();
-    $locali = uptimeSiti( $conf['radice'], uptimeVhost(), (array) $conf['escludi'], $scartati );
+    $locali = uptimeSiti( $conf['radice'], uptimeVhost(), (array) $conf['escludi'], $scartati, (array) $conf['profili'] );
     $siti = array_replace( uptimeEsterni( $conf['esterni'] ), $locali );
     foreach( $altri as $nome => $a ) {
         if( $a !== NULL ) {
