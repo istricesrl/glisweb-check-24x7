@@ -1,0 +1,32 @@
+# /etc/glisweb/uptime.yaml — configurazione del cluster di glisweb-check-24x7
+#
+# uguale su tutti i server tranne server:; proprietario root:www-data, permessi 640 ( lo legge anche Apache,
+# per la vista ); il formato campo per campo e' in docs/MANUALE.md
+#
+# ATTENZIONE questo e' un esempio coi segnaposto: il file vero contiene token e credenziali, e non si versiona
+
+server: web01
+token: "<token del cluster, uguale su tutti i server: openssl rand -hex 32>"
+cluster:
+  web01: https://<un host di web01>/glisweb-check-24x7/vista.php
+  web02: https://<un host di web02>/glisweb-check-24x7/vista.php
+# radice: /var/www/
+# dati: /var/lib/glisweb-check-24x7/
+paralleli: 4
+escludi: [ "prova.example.com" ]
+smtp:
+  host: localhost
+  port: 25
+  # user: "<utente>"
+  # pasw: "<password>"
+  from: uptime@example.com
+avvisa:
+  noi: [ "<indirizzo nostro>" ]
+esterni:
+  www.example.org:
+    url: https://www.example.org/
+    testo: "Example"
+    lento: 5
+    avvisa:
+      referente: [ "<indirizzo del referente>" ]
+      abilitato: true

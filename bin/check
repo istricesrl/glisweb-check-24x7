@@ -1,0 +1,21 @@
+#!/bin/bash
+
+## GIRO DEL CONTROLLO DI UPTIME
+#
+# fa un giro del controllo di uptime: lo lancia ogni minuto il timer systemd installato da
+# bin/install, e a mano serve per provare
+#
+#   bin/check                  un giro: controlli, registro, DOWNTIME.md, avvisi
+#   bin/check --secco          controlla e stampa, senza scrivere e senza avvisare
+#   bin/check --prova-avviso   manda una mail di prova agli indirizzi avvisa.noi
+#   bin/check --config FILE    legge un'altra configurazione al posto di /etc/glisweb/uptime.yaml
+#
+# NOTA lo script non stampa niente quando va tutto bene: gira ogni minuto, e quello che scrive
+# finisce nel journal
+#
+
+## cartella del progetto
+DIR="$( cd "$( dirname "$( readlink -f "$0" )" )/.." && pwd )"
+
+## giro
+exec php "$DIR/src/giro.php" "$@"

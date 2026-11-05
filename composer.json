@@ -1,0 +1,20 @@
+{
+    "name": "istricesrl/glisweb-check-24x7",
+    "description": "controllo di uptime dei siti glisweb di un cluster di server, indipendente dal framework",
+    "type": "project",
+    "authors": [
+        { "name": "Fabio Mosti", "email": "fabio.mosti@istricesrl.it" }
+    ],
+    "require": {
+        "php": ">=7.3",
+        "ext-curl": "*",
+        "ext-yaml": "*",
+        "phpmailer/phpmailer": "^6.9"
+    },
+    "require-dev": {
+        "phpunit/phpunit": "^9.6"
+    },
+    "scripts": {
+        "test": "phpunit"
+    }
+}

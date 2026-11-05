@@ -1,0 +1,123 @@
+#!/bin/bash
+
+## INSTALLAZIONE DEL CONTROLLO DI UPTIME
+#
+# installa o toglie glisweb-check-24x7 su questo server, dalla cartella in cui sta lo script
+# ( di norma /opt/glisweb-check-24x7 )
+#
+#   bin/install install    dipendenze, cartella dei dati, timer systemd, alias Apache della vista
+#   bin/install remove     ferma il timer e toglie unita' e alias; configurazione e dati restano
+#
+# l'installazione toglie anche il timer glisweb-uptime del framework, se c'e', e ne copia vista e
+# registro nella cartella dei dati: e' la migrazione dal controllo che stava in glisweb
+#
+
+## cartella del progetto
+DIR="$( cd "$( dirname "$( readlink -f "$0" )" )/.." && pwd )"
+
+## file
+CONFIG=/etc/glisweb/uptime.yaml
+SERVICE=/etc/systemd/system/glisweb-check-24x7.service
+TIMER=/etc/systemd/system/glisweb-check-24x7.timer
+APACHE=/etc/apache2/conf-available/glisweb-check-24x7.conf
+
+## la cartella dei dati: il campo dati: della configurazione, o il default
+dati() {
+    php -r 'require $argv[1] . "/src/uptime.php"; $c = uptimeLeggiConfig( $argv[2] ); echo ( $c === NULL ) ? UPTIME_DATI : $c["dati"];' "$DIR" "$CONFIG"
+}
+
+## solo root
+if [ "$(id -u)" != "0" ]; then
+    echo "va lanciato da root"
+    exit 1
+fi
+
+## azione
+case "$1" in
+
+    "install")
+
+        # configurazione
+        if [ ! -f $CONFIG ]; then
+            echo "manca $CONFIG: il formato e' in docs/MANUALE.md, un esempio in esempi/uptime.yaml"
+            exit 1
+        fi
+        chown root:www-data $CONFIG
+        chmod 640 $CONFIG
+        if grep -q "^deploy:" $CONFIG; then
+            echo "NOTA il campo deploy: di $CONFIG non serve piu' e si ignora: si puo' togliere"
+        fi
+
+        # dipendenze
+        if [ ! -f "$DIR/vendor/autoload.php" ]; then
+            echo "dipendenze: composer install --no-dev"
+            ( cd "$DIR" && COMPOSER_ALLOW_SUPERUSER=1 composer install --no-dev --no-interaction --quiet ) || exit 1
+        fi
+
+        # cartella dei dati
+        DATI="$(dati)"
+        mkdir -p "$DATI"
+        chown root:www-data "$DATI"
+        chmod 750 "$DATI"
+
+        # migrazione dal timer del framework: vista e registro, se nella cartella nuova non ci sono ancora
+        VECCHIO="$( sed -n 's/^deploy: *"\?\([^"]*\)"\? *$/\1/p' $CONFIG )"
+        if [ -n "$VECCHIO" ] && [ -f "${VECCHIO%/}/var/uptime/registro.jsonl" ] && [ ! -f "$DATI/registro.jsonl" ]; then
+            cp -p "${VECCHIO%/}/var/uptime/registro.jsonl" "$DATI/registro.jsonl"
+            [ -f "${VECCHIO%/}/var/uptime/stato.json" ] && cp -p "${VECCHIO%/}/var/uptime/stato.json" "$DATI/stato.json"
+            echo "migrati registro e vista da ${VECCHIO%/}/var/uptime/"
+        fi
+        if [ -f /etc/systemd/system/glisweb-uptime.timer ]; then
+            systemctl disable --now glisweb-uptime.timer
+            rm -f /etc/systemd/system/glisweb-uptime.timer /etc/systemd/system/glisweb-uptime.service
+            echo "tolto il timer glisweb-uptime del framework"
+        fi
+
+        # timer
+        printf '[Unit]\nDescription=glisweb-check-24x7, un giro del controllo di uptime\n\n[Service]\nType=oneshot\nExecStart=%s/bin/check\n' "$DIR" > $SERVICE
+        printf '[Unit]\nDescription=glisweb-check-24x7, ogni minuto\n\n[Timer]\nOnCalendar=*-*-* *:*:00\nAccuracySec=1s\n\n[Install]\nWantedBy=timers.target\n' > $TIMER
+        systemctl daemon-reload
+        systemctl enable --now glisweb-check-24x7.timer
+
+        # alias della vista: con Apache si scrive e si prova prima di ricaricare, con nginx solo le istruzioni
+        if [ -d /etc/apache2/conf-available ]; then
+            printf '# glisweb-check-24x7: la vista di questo server per gli altri server del cluster, scritto da %s/bin/install\nAlias /glisweb-check-24x7/ %s/www/\n<Directory %s/www/>\n    Options None\n    AllowOverride None\n    Require all granted\n</Directory>\n' "$DIR" "$DIR" "$DIR" > $APACHE
+            a2enconf -q glisweb-check-24x7
+            if apache2ctl configtest > /dev/null 2>&1; then
+                systemctl reload apache2
+                echo "alias Apache /glisweb-check-24x7/ attivo"
+            else
+                a2disconf -q glisweb-check-24x7
+                rm -f $APACHE
+                echo "ERRORE la configurazione di Apache non passa il configtest con l'alias: tolto, Apache non ricaricato"
+                apache2ctl configtest
+                exit 1
+            fi
+        else
+            echo "Apache non c'e': la vista va servita a mano, p.es. in nginx"
+            echo "    location /glisweb-check-24x7/ { alias $DIR/www/; ... php-fpm per vista.php ... }"
+        fi
+
+        echo "glisweb-check-24x7 installato da $DIR, dati in $DATI"
+        echo "da provare:"
+        echo "    systemctl list-timers glisweb-check-24x7.timer"
+        echo "    curl -s -o /dev/null -w '%{http_code}\n' -H \"X-Glisweb-Uptime: <token>\" https://<host di questo server>/glisweb-check-24x7/vista.php"
+    ;;
+
+    "remove")
+        systemctl disable --now glisweb-check-24x7.timer
+        rm -f $SERVICE $TIMER
+        systemctl daemon-reload
+        if [ -f $APACHE ]; then
+            a2disconf -q glisweb-check-24x7
+            rm -f $APACHE
+            apache2ctl configtest > /dev/null 2>&1 && systemctl reload apache2
+        fi
+        echo "glisweb-check-24x7 rimosso; restano $CONFIG e $(dati)"
+    ;;
+
+    *)
+        echo "$0 install|remove"
+    ;;
+
+esac
