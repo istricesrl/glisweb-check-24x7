@@ -69,11 +69,13 @@
     $prima = is_readable( $cartella . 'stato.json' ) ? json_decode( file_get_contents( $cartella . 'stato.json' ), true ) : array();
     $vista = isset( $prima['vista'] ) ? $prima['vista'] : array();
 
-    // viste degli altri server
+    // viste degli altri server, coi giri consecutivi in cui ognuno non l'ha data
     $altri = array();
+    $assenti = array();
     foreach( $conf['cluster'] as $nome => $url ) {
         if( $nome != $io ) {
             $altri[ $nome ] = uptimeVista( $url, $conf['token'] );
+            $assenti[ $nome ] = ( $altri[ $nome ] !== NULL ) ? 0 : ( isset( $prima['assenti'][ $nome ] ) ? $prima['assenti'][ $nome ] : 0 ) + 1;
         }
     }
 
@@ -137,12 +139,13 @@
         $ritardo = isset( $avvisa['ritardo'] ) ? $avvisa['ritardo'] : UPTIME_DEFAULT['ritardo'];
         $s = $vista[ $h ];
 
-        // giù, o confermato dopo un avviso non confermato
-        if( $c['mittente'] && ( empty( $s['avvisato'] ) || ( $s['avvisato'] === 'nonconfermato' && $c['stato'] === 'giu' ) ) ) {
-            $posta[] = array( $noiSito, '[uptime] ' . $h . ' GIU\'' . ( $c['stato'] === 'giu' ? '' : ' ( non confermato )' ),
+        // giù confermato: un down che vede un server solo va nel registro e nella vista, senza mail, perché quasi
+        // sempre è il server a non uscire in rete e non il sito ( 57 mail su 61 dal solo web02, 05-06/11/2026 )
+        // NOTA si confronta con 'giu' e non con empty(): uno stato.json di prima può avere ancora 'nonconfermato'
+        if( $c['mittente'] && $c['stato'] === 'giu' && ( ! isset( $s['avvisato'] ) || $s['avvisato'] !== 'giu' ) ) {
+            $posta[] = array( $noiSito, '[uptime] ' . $h . ' GIU\'',
                 $h . ' non risponde dal ' . date( 'd/m/Y H:i', $s['dal'] ) . ': ' . $s['errore'] . PHP_EOL
-                . 'visto giu\' da: ' . implode( ', ', $c['giu'] ) . PHP_EOL
-                . ( $c['stato'] === 'giu' ? '' : 'nessun altro server del cluster ha risposto: puo\' essere un problema di ' . $io . PHP_EOL ) );
+                . 'visto giu\' da: ' . implode( ', ', $c['giu'] ) . PHP_EOL );
             $vista[ $h ]['avvisato'] = $c['stato'];
         }
 
@@ -203,6 +206,17 @@
         $divergenza = isset( $prima['divergenza'] ) ? $prima['divergenza'] : NULL;
     }
 
+    // un server che non dà la sua vista da assenza giri lascia il cluster senza secondo parere: i down restano non
+    // confermati e non avvisano, quindi lo si dice una volta al giorno, invece di una mail per sito
+    $soli = array_keys( array_filter( $assenti, function( $n ) use( $conf ) { return $n >= $conf['assenza']; } ) );
+    if( ! empty( $soli ) && $primo && ( ! isset( $prima['isolamento'] ) || $prima['isolamento'] !== date( 'Y-m-d', $ora ) ) ) {
+        $posta[] = array( $noi, '[uptime] ' . $io . ': cluster senza secondo parere',
+            implode( ', ', $soli ) . ' non da\' la sua vista a ' . $io . ' da ' . $conf['assenza'] . ' giri o piu\': i down che ' . $io . ' vede da solo restano non confermati e non mandano mail. Controllare che ' . implode( ', ', $soli ) . ' sia acceso e raggiungibile, e la rete di ' . $io . '.' . PHP_EOL );
+        $isolamento = date( 'Y-m-d', $ora );
+    } else {
+        $isolamento = isset( $prima['isolamento'] ) ? $prima['isolamento'] : NULL;
+    }
+
     // a secco si stampa e ci si ferma
     if( $secco ) {
         foreach( $vista as $h => $v ) {
@@ -212,7 +226,7 @@
             echo 'scartato ( ' . $motivo . ' ): ' . $h . PHP_EOL;
         }
         foreach( $altri as $nome => $a ) {
-            echo 'vista di ' . $nome . ': ' . ( $a === NULL ? 'NON ricevuta' : count( $a['siti'] ) . ' siti' ) . PHP_EOL;
+            echo 'vista di ' . $nome . ': ' . ( $a === NULL ? 'NON ricevuta da ' . $assenti[ $nome ] . ' giri' : count( $a['siti'] ) . ' siti' ) . PHP_EOL;
         }
         echo 'esterni: impronta ' . $impronta . ( empty( $diversi ) ? '' : ', diversa da ' . implode( ', ', $diversi ) ) . PHP_EOL;
         foreach( $eventi as $e ) {
@@ -236,7 +250,7 @@
         unset( $s['deploy'], $s['dichiarato'], $s['avvisa'] );
         $pubblici[ $h ] = $s;
     }
-    file_put_contents( $cartella . 'stato.json', json_encode( array( 'server' => $io, 'ora' => date( 'c', $ora ), 'dns' => $dns, 'impronta' => $impronta, 'divergenza' => $divergenza, 'siti' => $pubblici, 'vista' => $vista ), JSON_PRETTY_PRINT ), LOCK_EX );
+    file_put_contents( $cartella . 'stato.json', json_encode( array( 'server' => $io, 'ora' => date( 'c', $ora ), 'dns' => $dns, 'impronta' => $impronta, 'divergenza' => $divergenza, 'assenti' => $assenti, 'isolamento' => $isolamento, 'siti' => $pubblici, 'vista' => $vista ), JSON_PRETTY_PRINT ), LOCK_EX );
     @chgrp( $cartella . 'stato.json', 'www-data' );
     @chmod( $cartella . 'stato.json', 0640 );
 

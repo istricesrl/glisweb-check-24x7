@@ -129,7 +129,8 @@
             'smtp'      => array(),
             'avvisa'    => array(),
             'esterni'   => array(),
-            'profili'   => array( '*' )
+            'profili'   => array( '*' ),
+            'assenza'   => 5
         ), $conf );
 
         $conf['dati'] = rtrim( $conf['dati'], '/' ) . '/';
@@ -684,6 +685,8 @@
      * nonconfermato    il server lo vede giù e nessun altro server lo controlla o risponde
      *
      * Avvisa uno solo dei server che lo vedono giù, il primo in ordine alfabetico, perché le mail non arrivino doppie.
+     * Un sito nonconfermato non manda mail ( decisione del 06/11/2026 ): va nel registro e nella vista, e se manca il
+     * secondo parere perché un server non risponde lo dice una mail sola al giorno, quella dell'assenza ( giro.php ).
      *
      * @param   string      $server         il nome di questo server
      * @param   string      $locale         lo stato locale del sito ( su|giu )

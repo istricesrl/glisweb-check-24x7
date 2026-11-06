@@ -76,6 +76,7 @@
                     'test2' => self::$url . '/altro',
                     'test3' => self::$url . '/assente'
                 ),
+                'assenza'   => 2,
                 'smtp'      => array( 'host' => '127.0.0.1', 'port' => 1, 'from' => 'uptime@example.com' ),
                 'avvisa'    => array( 'noi' => array( 'noi@example.com' ) ),
                 'esterni'   => array(
@@ -173,11 +174,18 @@
             $this->assertSame( 200, $codice );
             $this->assertSame( 'test1', json_decode( $corpo, true )['server'] );
 
-            // al terzo fallimento è giù, confermato da test2: inizio nel registro e avviso a noi
-            $this->giro();
+            // test3 non dà la vista da due giri ( assenza: 2 ): una mail sola, che dice che manca il secondo parere
+            $this->assertStringNotContainsString( 'secondo parere', $err );
+            list( $uscita, $out, $err ) = $this->giro();
+            $this->assertStringContainsString( 'avviso non inviato: [uptime] test1: cluster senza secondo parere', $err );
+            $this->assertSame( 2, json_decode( file_get_contents( self::$cartella . 'dati/stato.json' ), true )['assenti']['test3'] );
+            $this->assertSame( 0, json_decode( file_get_contents( self::$cartella . 'dati/stato.json' ), true )['assenti']['test2'] );
+
+            // al terzo fallimento è giù, confermato da test2: inizio nel registro e avviso a noi; l'assenza non si ripete
             list( $uscita, $out, $err ) = $this->giro();
             $this->assertSame( "inizio giu.test\n", $out );
             $this->assertStringContainsString( "avviso non inviato: [uptime] giu.test GIU'", $err );
+            $this->assertStringNotContainsString( 'secondo parere', $err );
             $registro = array_map( 'json_decode', file( self::$cartella . 'dati/registro.jsonl' ) );
             $this->assertSame( 'inizio', $registro[0]->evento );
             $this->assertTrue( $registro[0]->confermato );
@@ -190,7 +198,7 @@
             $this->assertMatchesRegularExpression( '/^giu\.test\s+giu\s+4 /m', $out );
             $this->assertMatchesRegularExpression( '/^su\.test\s+su\s+0 /m', $out );
             $this->assertStringContainsString( 'vista di test2: 0 siti', $out );
-            $this->assertStringContainsString( 'vista di test3: NON ricevuta', $out );
+            $this->assertStringContainsString( 'vista di test3: NON ricevuta da 4 giri', $out );
             $this->assertSame( $prima, file_get_contents( self::$cartella . 'dati/stato.json' ) );
 
             // torna su: fine nel registro, e l'avviso a chi era stato avvisato
@@ -199,6 +207,36 @@
             $this->assertSame( "fine giu.test\n", $out );
             $this->assertStringContainsString( 'avviso non inviato: [uptime] giu.test di nuovo su', $err );
             $this->assertCount( 2, file( self::$cartella . 'dati/registro.jsonl' ) );
+
+        }
+
+        // un down che vede solo questo server: nel registro e nella vista come non confermato, ma senza mail
+        public function testNonConfermato() {
+
+            // si riparte da zero, e test2 adesso non controlla giu.test: nessun secondo parere
+            @unlink( self::$cartella . 'dati/stato.json' );
+            @unlink( self::$cartella . 'dati/registro.jsonl' );
+            file_put_contents( self::$altro, json_encode( array( 'server' => 'test2', 'impronta' => uptimeImpronta( array() ), 'siti' => array(), 'vista' => array() ) ) );
+            self::scriviConfig( '/assente' );
+
+            $this->giro();
+            $this->giro();
+            list( $uscita, $out, $err ) = $this->giro();
+            $this->assertSame( 0, $uscita );
+            $this->assertSame( "inizio giu.test\n", $out );
+            $this->assertStringNotContainsString( 'giu.test GIU', $err );
+            $registro = array_map( 'json_decode', file( self::$cartella . 'dati/registro.jsonl' ) );
+            $this->assertFalse( $registro[0]->confermato );
+            $this->assertSame( array( 'test1' ), $registro[0]->server );
+            $stato = json_decode( file_get_contents( self::$cartella . 'dati/stato.json' ), true );
+            $this->assertSame( 'nonconfermato', $stato['vista']['giu.test']['globale'] );
+            $this->assertArrayNotHasKey( 'avvisato', $stato['vista']['giu.test'] );
+
+            // torna su: fine nel registro, e nessun "di nuovo su", perché nessuno era stato avvisato
+            self::scriviConfig( '/ok' );
+            list( $uscita, $out, $err ) = $this->giro();
+            $this->assertSame( "fine giu.test\n", $out );
+            $this->assertStringNotContainsString( 'di nuovo su', $err );
 
         }
 

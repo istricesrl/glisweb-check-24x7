@@ -13,6 +13,8 @@ cluster:
 # radice: /var/www/
 # dati: /var/lib/glisweb-check-24x7/
 paralleli: 4
+# i giri senza la vista di un altro server dopo i quali si avvisa, una volta al giorno, che manca il secondo parere
+# assenza: 5
 escludi: [ "prova.example.com" ]
 # i profili da controllare, alla fnmatch(): di default tutti; per restringere, p.es. [ "PROD*" ]. Un deploy li
 # sostituisce col suo etc/uptime.yaml, un host si accende o si spegne con attivo: true|false nel suo

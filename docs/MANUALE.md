@@ -129,8 +129,11 @@ su                 | il server lo vede su, oppure lo vede giù ma un altro serve
 giù                | il server lo vede giù e almeno un altro server lo vede giù
 non confermato     | il server lo vede giù e nessun altro server risponde
 
-**Un down è confermato solo se lo vedono almeno due server.** Se un altro server vede su il sito, il problema è del
-primo server, non del sito.
+**Un down è confermato solo se lo vedono almeno due server, e solo un down confermato manda mail.** Se un altro server
+vede su il sito, il problema è del primo server, non del sito. Un down non confermato va nel registro e nella vista,
+senza mail: quasi sempre è il server che non esce in rete, e allora vanno giù insieme tutti i suoi siti ( il 05 e
+06/11/2026 web02 ha mandato così 57 mail in tre minuti, mentre web03 vedeva su gli stessi siti ). Se il secondo parere
+manca perché un altro server non dà la sua vista, lo dice una mail sola al giorno ( vedi [avvisi](#avvisi) ).
 
 la vista e lo scambio fra i server
 ----------------------------------
@@ -282,6 +285,7 @@ campo          | obbligatorio | cosa
 `radice`       | no           | la cartella dei progetti, di default `/var/www/`
 `dati`         | no           | la cartella di vista e registro, di default `/var/lib/glisweb-check-24x7/`
 `paralleli`    | no           | i controlli contemporanei, di default 4
+`assenza`      | no           | i giri senza la vista di un altro server dopo i quali si avvisa che manca il secondo parere, di default 5
 `escludi`      | no           | gli host da non controllare, qualunque cosa dicano deploy e host
 `profili`      | no           | i modelli dei profili da controllare, di default `[ "*" ]`, tutti; vedi [quali profili si controllano](#quali-profili-si-controllano)
 `esterni`      | no           | i siti esterni, vedi sotto
@@ -354,16 +358,19 @@ Avvisa solo uno dei server che vedono giù il sito, il primo in ordine alfabetic
 
 quando                                         | a chi
 -----------------------------------------------|-------------------------------------------------------
-il sito è giù, confermato o non confermato     | noi, subito
+il sito è giù, confermato                      | noi, subito
+il sito è giù, non confermato                  | nessuno: solo il registro e la vista
 un down non confermato viene confermato        | noi
 il down confermato dura da `ritardo` minuti    | il referente, solo se `abilitato`
+un server non dà la vista da `assenza` giri    | noi, una volta al giorno: il cluster è senza secondo parere
 il sito torna su                               | chi era stato avvisato: noi, e il referente se lo era stato
 certificato in scadenza                        | noi, una volta al giorno
 un server non risolve nessuno dei suoi siti    | noi, una volta al giorno
 la sezione `esterni:` diverge fra i server     | noi, una volta al giorno
 risposta lenta                                 | nessuno: solo il registro
 
-Il referente non riceve mai un down non confermato. Un sito `DEV` o `TEST` acceso ( vedi
+Un down non confermato non avvisa nessuno, né noi né il referente. Ne segue che un cluster di un server solo non
+manda mai l'avviso di un down: per avere gli avvisi servono almeno due server. Un sito `DEV` o `TEST` acceso ( vedi
 [quali profili si controllano](#quali-profili-si-controllano) ) ha gli stessi avvisi di uno di produzione.
 
 esercizio
@@ -439,7 +446,8 @@ leggibile dal gruppo `www-data`. `bin/check --secco` sull'altro server dice qual
 il server da cui parte il controllo
 -----------------------------------
 Se il controllo di un server si ferma, gli altri vedono la sua vista sparire: i loro down diventano non confermati
-e l'avviso va solo a noi, che è il segnale. A differenza di quando stava nel framework, non si ferma più per un
+e non avvisano, e dopo `assenza` giri arriva a noi la mail del cluster senza secondo parere, che è il segnale.
+`bin/check --secco` dice da quanti giri manca ogni vista. A differenza di quando stava nel framework, non si ferma più per un
 deploy rotto o per un aggiornamento notturno: servono PHP, systemd e, per la vista, Apache.
 
 sviluppo e test
@@ -463,7 +471,8 @@ I test sono due gruppi:
   router di `tests/server/`, e prova la vista ( 403 senza token, 404 prima del primo giro, 200 dopo ), i controlli
   ( su, codice sbagliato, testo assente, timeout ) e il giro completo con `bin/check` su una configurazione
   temporanea: un sito che cade e viene confermato da un secondo server, uno che resta su, un terzo server che non
-  risponde, la divergenza degli esterni, il registro, `--secco` che non scrive, il ritorno su. L'SMTP punta a una
+  risponde e la mail sola del secondo parere che manca, la divergenza degli esterni, il registro, `--secco` che non
+  scrive, il ritorno su; e un down che vede un server solo, che va nel registro senza mail. L'SMTP punta a una
   porta chiusa, quindi gli avvisi falliscono e si leggono nell'errore standard.
 
 Ogni modifica porta il suo test, nello stesso commit, e aggiorna questo manuale. Il repository è **pubblico**: niente

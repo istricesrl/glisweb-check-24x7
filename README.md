@@ -7,7 +7,9 @@ Ogni server del cluster controlla una volta al minuto tutti i siti glisweb, i su
 qualunque profilo abbiano ( chi vuole restringere sceglie i profili per cluster, per deploy e per host ), più i siti
 esterni della configurazione; i server si scambiano quello che vedono, e **un sito è giù
 solo se lo vedono giù almeno due server**. Tiene il registro dei periodi di down, ne ricava il `DOWNTIME.md` di ogni
-progetto e avvisa per mail chi lo amministra, e il referente del sito solo se abilitato e a down confermato.
+progetto e avvisa per mail chi lo amministra, e il referente del sito solo se abilitato. Avvisa solo per i down
+confermati: quello che vede un server solo va nel registro, e se un server del cluster smette di rispondere lo dice
+una mail sola al giorno.
 
 Sta in un progetto suo, e non dentro un deploy, perché **un controllo di uptime non deve dipendere da quello che
 controlla**: un timer appoggiato a un deploy muore con un aggiornamento notturno sbagliato di quel deploy. Dei deploy
