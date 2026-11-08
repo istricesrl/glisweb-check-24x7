@@ -120,16 +120,38 @@
     }
     $posta = array();
 
-    // gli avvisi dei siti si raccolgono per tipo, destinatari e deploy, e partono una mail per gruppo: un multisito
-    // con 30 siti che cade insieme manda una mail sola ( 41 siti GIMBE giù insieme tre volte l'08/11/2026 )
-    $gruppi = array();
-    $raccogli = function( $tipo, $a, $h, $riga ) use( &$gruppi, &$siti ) {
+    // gli avvisi dei siti si raccolgono per gruppo ( tipo, destinatari e deploy; gli esterni fanno gruppo fra loro ), e
+    // si avvisa solo quando cambia lo stato del gruppo: da tutto su a giù col primo sito che cade, da giù a tutto su
+    // quando torna l'ultimo, col downtime; i siti che cadono o tornano in mezzo non mandano mail. Un multisito di 30
+    // siti mandava 30 mail ( 41 siti GIMBE giù insieme tre volte l'08/11/2026 ); lo stato dei gruppi sta in stato.json
+    $gruppi = isset( $prima['gruppi'] ) ? $prima['gruppi'] : array();
+    $nuovi = $toccati = $certificati = array();
+    $raccogli = function( $tipo, $a, $h, $riga, $dal = NULL, $muto = false ) use( &$gruppi, &$nuovi, &$toccati, &$certificati, &$siti, $ora ) {
         $g = ! empty( $siti[ $h ]['deploy'] ) ? $siti[ $h ]['deploy'] : ( ! empty( $siti[ $h ]['esterno'] ) ? 'esterni' : ( isset( $siti[ $h ]['origine'] ) ? $siti[ $h ]['origine'] : 'altri' ) );
-        $k = $tipo . '|' . json_encode( array_values( (array) $a ) ) . '|' . $g;
-        if( ! isset( $gruppi[ $k ] ) ) {
-            $gruppi[ $k ] = array( 'tipo' => $tipo, 'a' => $a, 'gruppo' => $g, 'righe' => array() );
+        $giu = array( 'su' => 'giu', 'raggiungibile' => 'referente' );
+        $k = ( isset( $giu[ $tipo ] ) ? $giu[ $tipo ] : $tipo ) . '|' . json_encode( array_values( (array) $a ) ) . '|' . $g;
+        if( $tipo === 'certificato' ) {
+            $certificati[ $k ]['a'] = $a;
+            $certificati[ $k ]['gruppo'] = $g;
+            $certificati[ $k ]['righe'][ $h ] = $riga;
+        } elseif( isset( $giu[ $tipo ] ) ) {
+            if( isset( $gruppi[ $k ]['giu'][ $h ] ) ) {
+                unset( $gruppi[ $k ]['giu'][ $h ] );
+                $gruppi[ $k ]['tornati'][ $h ] = $riga;
+                $toccati[ $k ] = true;
+            }
+        } else {
+            if( empty( $gruppi[ $k ]['giu'] ) ) {
+                $gruppi[ $k ] = array( 'tipo' => $tipo, 'a' => $a, 'gruppo' => $g, 'dal' => ( $dal === NULL ) ? $ora : $dal, 'giu' => array(), 'tornati' => array() );
+                if( ! $muto ) {
+                    $nuovi[ $k ] = true;
+                }
+            }
+            if( ! $muto || ! isset( $gruppi[ $k ]['giu'][ $h ] ) ) {
+                $gruppi[ $k ]['giu'][ $h ] = $riga;
+            }
+            $gruppi[ $k ]['dal'] = min( $gruppi[ $k ]['dal'], ( $dal === NULL ) ? $ora : $dal );
         }
-        $gruppi[ $k ]['righe'][ $h ] = $riga;
     };
 
     foreach( $vista as $h => $v ) {
@@ -156,19 +178,27 @@
         // NOTA si confronta con 'giu' e non con empty(): uno stato.json di prima può avere ancora 'nonconfermato'
         if( $c['mittente'] && $c['stato'] === 'giu' && ( ! isset( $s['avvisato'] ) || $s['avvisato'] !== 'giu' ) ) {
             $raccogli( 'giu', $noiSito, $h, $h . ' non risponde dal ' . date( 'd/m/Y H:i', $s['dal'] ) . ': ' . $s['errore'] . PHP_EOL
-                . 'visto giu\' da: ' . implode( ', ', $c['giu'] ) . PHP_EOL );
+                . 'visto giu\' da: ' . implode( ', ', $c['giu'] ) . PHP_EOL, $s['dal'] );
             $vista[ $h ]['avvisato'] = $c['stato'];
+        }
+
+        // un sito avvisato prima che ci fossero i gruppi ( stato.json di prima dell'08/11/2026 ) entra nel suo gruppo
+        // senza mail, così al ritorno il "di nuovo su" parte lo stesso
+        foreach( array( 'giu' => array( 'avvisato', $noiSito ), 'referente' => array( 'referente', $referente ) ) as $tipo => $x ) {
+            if( $c['stato'] === 'giu' && ! empty( $s[ $x[0] ] ) && ! empty( $x[1] ) ) {
+                $raccogli( $tipo, $x[1], $h, $h . ' non risponde dal ' . date( 'd/m/Y H:i', $s['dal'] ) . PHP_EOL, $s['dal'], true );
+            }
         }
 
         // il referente, solo se abilitato e dopo il ritardo di down confermato
         if( $c['mittente'] && $c['stato'] === 'giu' && ! empty( $referente ) && empty( $s['referente'] ) && $ora - $s['dal'] >= $ritardo * 60 ) {
-            $raccogli( 'referente', $referente, $h, 'Il sito ' . $h . ' non risponde dal ' . date( 'd/m/Y H:i', $s['dal'] ) . '. Ce ne stiamo gia\' occupando.' . PHP_EOL );
+            $raccogli( 'referente', $referente, $h, 'Il sito ' . $h . ' non risponde dal ' . date( 'd/m/Y H:i', $s['dal'] ) . '. Ce ne stiamo gia\' occupando.' . PHP_EOL, $s['dal'] );
             $vista[ $h ]['referente'] = true;
         }
 
         // di nuovo su: lo dice chi aveva avvisato, a chi era stato avvisato
         if( $e !== NULL && $e['evento'] === 'fine' && ! empty( $v['avvisato'] ) ) {
-            $corpo = $h . ' risponde di nuovo dal ' . date( 'd/m/Y H:i', $ora ) . ', dopo ' . ceil( $e['durata'] / 60 ) . ' minuti.' . PHP_EOL;
+            $corpo = $h . ' risponde di nuovo dal ' . date( 'd/m/Y H:i', $ora ) . ', dopo ' . uptimeDurata( $e['durata'] ) . '.' . PHP_EOL;
             $raccogli( 'su', $noiSito, $h, $corpo );
             if( ! empty( $v['referente'] ) ) {
                 $raccogli( 'raggiungibile', $referente, $h, $corpo );
@@ -189,19 +219,42 @@
 
     }
 
-    // un gruppo di un sito solo tiene l'oggetto di sempre, uno di più siti li conta nell'oggetto e li elenca nel corpo
-    $oggetti = array( 'giu' => array( ' GIU\'', 'siti GIU\'' ), 'referente' => array( ' non raggiungibile', 'siti non raggiungibili' ),
-        'su' => array( ' di nuovo su', 'siti di nuovo su' ), 'raggiungibile' => array( ' di nuovo raggiungibile', 'siti di nuovo raggiungibili' ),
-        'certificato' => array( ': certificato in scadenza', 'certificati in scadenza' ) );
-    foreach( $gruppi as $gr ) {
-        $n = count( $gr['righe'] );
-        if( $n === 1 ) {
-            $h = key( $gr['righe'] );
-            $oggetto = ( $gr['tipo'] === 'certificato' ) ? '[uptime] ' . $h . ': il certificato scade fra ' . $vista[ $h ]['certificato'] . ' giorni' : '[uptime] ' . $h . $oggetti[ $gr['tipo'] ][0];
-        } else {
-            $oggetto = '[uptime] ' . ( ( $gr['tipo'] === 'referente' || $gr['tipo'] === 'raggiungibile' ) ? '' : $gr['gruppo'] . ': ' ) . $n . ' ' . $oggetti[ $gr['tipo'] ][1];
+    // un sito uscito dal controllo esce anche dal suo gruppo, altrimenti il gruppo resterebbe giù per sempre
+    foreach( $gruppi as $k => $gr ) {
+        foreach( array_diff_key( $gr['giu'], $vista ) as $h => $riga ) {
+            unset( $gruppi[ $k ]['giu'][ $h ] );
+            $toccati[ $k ] = true;
         }
-        $posta[] = array( $gr['a'], $oggetto, implode( ( $n === 1 ) ? '' : PHP_EOL, $gr['righe'] ) );
+    }
+
+    // le mail dei cambi di stato: un gruppo di un sito solo tiene l'oggetto di sempre, uno di più siti li conta
+    // nell'oggetto e li elenca nel corpo; al referente l'oggetto non porta il percorso del deploy
+    $oggetti = array( 'giu' => array( ' GIU\'', 'siti GIU\'', ' di nuovo su', 'di nuovo tutto su' ),
+        'referente' => array( ' non raggiungibile', 'siti non raggiungibili', ' di nuovo raggiungibile', 'siti di nuovo raggiungibili' ) );
+    foreach( $gruppi as $k => $gr ) {
+        $prefisso = '[uptime] ' . ( ( $gr['tipo'] === 'referente' ) ? '' : $gr['gruppo'] . ': ' );
+        if( isset( $nuovi[ $k ] ) ) {
+            $n = count( $gr['giu'] );
+            $posta[] = array( $gr['a'], ( $n === 1 ) ? '[uptime] ' . key( $gr['giu'] ) . $oggetti[ $gr['tipo'] ][0] : $prefisso . $n . ' ' . $oggetti[ $gr['tipo'] ][1],
+                implode( ( $n === 1 ) ? '' : PHP_EOL, $gr['giu'] ) );
+        } elseif( isset( $toccati[ $k ] ) && empty( $gr['giu'] ) ) {
+            $n = count( $gr['tornati'] );
+            $durata = uptimeDurata( $ora - $gr['dal'] );
+            $posta[] = array( $gr['a'], ( $n === 1 ) ? '[uptime] ' . key( $gr['tornati'] ) . $oggetti[ $gr['tipo'] ][2] . ' dopo ' . $durata
+                : $prefisso . ( ( $gr['tipo'] === 'referente' ) ? $n . ' ' : '' ) . $oggetti[ $gr['tipo'] ][3] . ' dopo ' . $durata,
+                'Downtime: ' . $durata . ', dal ' . date( 'd/m/Y H:i', $gr['dal'] ) . ' al ' . date( 'd/m/Y H:i', $ora ) . '.' . PHP_EOL . PHP_EOL . implode( '', $gr['tornati'] ) );
+        }
+        if( empty( $gr['giu'] ) && ! isset( $nuovi[ $k ] ) ) {
+            unset( $gruppi[ $k ] );
+        }
+    }
+
+    // i certificati in scadenza non sono un cambio di stato: una mail al giorno per gruppo
+    foreach( $certificati as $gr ) {
+        $n = count( $gr['righe'] );
+        $h = key( $gr['righe'] );
+        $posta[] = array( $gr['a'], ( $n === 1 ) ? '[uptime] ' . $h . ': il certificato scade fra ' . $vista[ $h ]['certificato'] . ' giorni' : '[uptime] ' . $gr['gruppo'] . ': ' . $n . ' certificati in scadenza',
+            implode( '', $gr['righe'] ) );
     }
 
     // se il server ha dei siti ma nessuno risulta pubblico, il problema è più probabilmente il DNS del server che i
@@ -275,7 +328,7 @@
         unset( $s['deploy'], $s['dichiarato'], $s['avvisa'] );
         $pubblici[ $h ] = $s;
     }
-    file_put_contents( $cartella . 'stato.json', json_encode( array( 'server' => $io, 'ora' => date( 'c', $ora ), 'dns' => $dns, 'impronta' => $impronta, 'divergenza' => $divergenza, 'assenti' => $assenti, 'isolamento' => $isolamento, 'siti' => $pubblici, 'vista' => $vista ), JSON_PRETTY_PRINT ), LOCK_EX );
+    file_put_contents( $cartella . 'stato.json', json_encode( array( 'server' => $io, 'ora' => date( 'c', $ora ), 'dns' => $dns, 'impronta' => $impronta, 'divergenza' => $divergenza, 'assenti' => $assenti, 'isolamento' => $isolamento, 'gruppi' => $gruppi, 'siti' => $pubblici, 'vista' => $vista ), JSON_PRETTY_PRINT ), LOCK_EX );
     @chgrp( $cartella . 'stato.json', 'www-data' );
     @chmod( $cartella . 'stato.json', 0640 );
 

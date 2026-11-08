@@ -837,6 +837,24 @@
     }
 
     /**
+     * una durata in secondi detta a parole: minuti, oppure ore e minuti
+     *
+     * @param   int         $secondi        la durata
+     * @return  string                      p.es. "7 minuti", "2 ore e 5 minuti"
+     */
+    function uptimeDurata( $secondi ) {
+
+        $m = max( 1, (int) ceil( $secondi / 60 ) );
+        if( $m < 60 ) {
+            return $m . ( ( $m === 1 ) ? ' minuto' : ' minuti' );
+        }
+        $h = intdiv( $m, 60 );
+        $m = $m % 60;
+        return $h . ( ( $h === 1 ) ? ' ora' : ' ore' ) . ( ( $m === 0 ) ? '' : ' e ' . $m . ( ( $m === 1 ) ? ' minuto' : ' minuti' ) );
+
+    }
+
+    /**
      * manda un avviso via SMTP diretto
      *
      * Non passa da nessuna coda: quella delle mail di un sito vive nel suo database, proprio quello che potrebbe
