@@ -64,7 +64,7 @@
         }
 
         // la configurazione del cluster di prova: giu.test punta a $giu, il resto è fisso
-        private static function scriviConfig( $giu ) {
+        private static function scriviConfig( $giu, $doppio = false ) {
 
             file_put_contents( self::$config, yaml_emit( array(
                 'server'    => 'test1',
@@ -79,10 +79,10 @@
                 'assenza'   => 2,
                 'smtp'      => array( 'host' => '127.0.0.1', 'port' => 1, 'from' => 'uptime@example.com' ),
                 'avvisa'    => array( 'noi' => array( 'noi@example.com' ) ),
-                'esterni'   => array(
+                'esterni'   => array_merge( array(
                     'giu.test'  => array( 'url' => self::$url . $giu, 'timeout' => 2 ),
                     'su.test'   => array( 'url' => self::$url . '/ok', 'testo' => 'OK', 'timeout' => 2 )
-                )
+                ), ( $doppio ) ? array( 'giu2.test' => array( 'url' => self::$url . $giu, 'timeout' => 2 ) ) : array() )
             ) ) );
 
         }
@@ -237,6 +237,29 @@
             list( $uscita, $out, $err ) = $this->giro();
             $this->assertSame( "fine giu.test\n", $out );
             $this->assertStringNotContainsString( 'di nuovo su', $err );
+
+        }
+
+        // due siti dello stesso gruppo che cadono insieme: una mail sola, che li conta e li elenca, e una sola al ritorno
+        public function testRaggruppati() {
+
+            @unlink( self::$cartella . 'dati/stato.json' );
+            @unlink( self::$cartella . 'dati/registro.jsonl' );
+            file_put_contents( self::$altro, json_encode( array( 'server' => 'test2', 'impronta' => 'diversa', 'siti' => array(),
+                'vista' => array( 'giu.test' => array( 'locale' => 'giu' ), 'giu2.test' => array( 'locale' => 'giu' ) ) ) ) );
+            self::scriviConfig( '/assente', true );
+
+            $this->giro();
+            $this->giro();
+            list( $uscita, $out, $err ) = $this->giro();
+            $this->assertSame( 1, substr_count( $err, "avviso non inviato: [uptime] esterni: 2 siti GIU'" ) );
+            $this->assertStringNotContainsString( "giu.test GIU'", $err );
+            $this->assertStringNotContainsString( "giu2.test GIU'", $err );
+
+            self::scriviConfig( '/ok', true );
+            list( $uscita, $out, $err ) = $this->giro();
+            $this->assertSame( 1, substr_count( $err, 'avviso non inviato: [uptime] esterni: 2 siti di nuovo su' ) );
+            $this->assertStringNotContainsString( 'giu.test di nuovo su', $err );
 
         }
 
